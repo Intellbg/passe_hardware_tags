@@ -10,7 +10,11 @@ import os
 log_dir = "logs"
 if not os.path.exists(log_dir):
     os.makedirs(log_dir)
-logging.basicConfig(level=logging.DEBUG)
+
+logging.basicConfig(level=logging.INFO)
+debug = False
+if debug:
+    logging.basicConfig(level=logging.DEBUG)
 handler = TimedRotatingFileHandler(
     os.path.join(log_dir, "tags.log"), when="midnight", interval=1, backupCount=7
 )
@@ -18,8 +22,6 @@ handler.suffix = "%Y-%m-%d"
 formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
 handler.setFormatter(formatter)
 logging.getLogger("").addHandler(handler)
-
-debug = False
 
 
 def _set_tag_number(data, tag_number):
@@ -121,11 +123,34 @@ def block_tag(tag_number: str, ip: str, sn: int, port=60000):
     logging.info(f"Tag {tag_number} blocked")
 
 
-def config_server_ip():
+def config_watcher_server_ip(ip, sn, port, watcher_ip, watcher_port):
+    data = [0x00] * 64
+    data[0] = 0x17
+    data[1] = 0x90
+    data=_set_sn(data,sn)
+    watcher_ip = watcher_ip.split(".")
+    if len(watcher_ip) != 4:
+        logging.error("Wrong IP")
+        return
+    data[8] = int(watcher_ip[0])
+    data[9] = int(watcher_ip[1])
+    data[10] = int(watcher_ip[2])
+    data[11] = int(watcher_ip[3])
+
+    bytes_watcher_port = watcher_port.to_bytes(2, "little")
+    data[12] = bytes_watcher_port[1]
+    data[13] = bytes_watcher_port[0]
+
+    data[14] = 99
+    print(data)
+    byte_array = send_request(data, (ip, port))
+    for b in byte_array:
+        print(hex(b)[2:].zfill(2), end=" ")
+    print("")
     return None
 
 
-def retrieve_server_ip(ip, sn, port=6000):
+def retrieve_watcher_server_ip(ip, sn, port=6000):
     data = [0x00] * 64
     data[0] = 0x17
     data[1] = 0x92  # command
@@ -134,7 +159,10 @@ def retrieve_server_ip(ip, sn, port=6000):
     byte_array = send_request(data, (ip, port))
     if not byte_array:
         logging.error("Could not retrieve")
-    logging.info(f"IP: {byte_array[8]}.{byte_array[9]}.{byte_array[10]}.{byte_array[11]}, PORT: {int.from_bytes(byte_array[12:14])}, TIME:{byte_array[14]}")
+    logging.info(
+        f"IP: {byte_array[8]}.{byte_array[9]}.{byte_array[10]}.{byte_array[11]}, PORT: {int.from_bytes(byte_array[12:14])}, TIME:{byte_array[14]}"
+    )
+
 
 def send_request(data, address):
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -153,46 +181,68 @@ def send_request(data, address):
     return []
 
 
-def main(ip, sn, command, tag=None, port=60000, server_ip=None):
-    sn = int(sn)
-    if command in ["create", "allow", "bloc", "retrieve"] and not tag:
-        logging.error("Tag number needed")
-        return
-    if tag:
-        tag = int(tag)
-    if command in ["config_server"] and not server_ip:
-        logging.error("Server IP needed")
-        return
-    if command == "create":
-        create_tag(tag, ip, sn, port)
-        return
-    elif command == "allow":
-        allow_tag(tag, ip, sn, port)
-        return
-    elif command == "block":
-        block_tag(tag, ip, sn, port)
-        return
-    elif command == "retrieve":
-        retrieve_tag(tag, ip, sn, port)
-        return
-    elif command == "delete":
-        delete_tag(tag, ip, sn, port)
-        return
-    elif command == "retrieve_server_ip":
-        retrieve_server_ip(ip, sn, port)
-        return
-    logging.error("Wrong command")
+def main(ip, sn, command, tag=None, port=60000, watcher_ip=None, watcher_port=10275):
+    try:
+        sn = int(sn)
+        if command in ["create", "allow", "bloc", "retrieve"] and not tag:
+            logging.error("Tag number needed")
+            return
+        if tag:
+            tag = int(tag)
+        if watcher_port:
+            watcher_port=int(watcher_port)
+        if command in ["config_watcher_server_ip"] and not watcher_ip:
+            logging.error("Server IP needed")
+            return
+        if command == "create":
+            create_tag(tag, ip, sn, port)
+            return
+        elif command == "allow":
+            allow_tag(tag, ip, sn, port)
+            return
+        elif command == "block":
+            block_tag(tag, ip, sn, port)
+            return
+        elif command == "retrieve":
+            retrieve_tag(tag, ip, sn, port)
+            return
+        elif command == "delete":
+            delete_tag(tag, ip, sn, port)
+            return
+        elif command == "retrieve_server_ip":
+            retrieve_watcher_server_ip(ip, sn, port)
+            return
+        elif command == "config_watcher_server_ip":
+            config_watcher_server_ip(ip, sn, port, watcher_ip, watcher_port)
+            return
+        logging.error("Wrong command")
+    except Exception as e:
+        raise e
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Passe Tag Controller")
-    parser.add_argument("ip", help="Controller IP")
-    parser.add_argument("sn", help="Controller SN")
-    parser.add_argument("command", help="Controller Command")
-    parser.add_argument("-t", "--tag", help="Tag Number")
-    parser.add_argument("-i", "--server", help="Auxiliar server IP")
-    parser.add_argument("-P", "--port", default=60000, help="Connection port")
-    parser.add_argument("-D", "--debug", help="Enable debug")
-    args = parser.parse_args()
-
-    main(args.ip, args.sn, args.command, args.tag, args.port, args.server)
+    try:
+        parser = argparse.ArgumentParser(description="Passe Tag Controller")
+        parser.add_argument("ip", help="Controller IP")
+        parser.add_argument("sn", help="Controller SN")
+        parser.add_argument("command", help="Controller Command")
+        parser.add_argument("-t", "--tag", help="Tag Number", default=None)
+        parser.add_argument("-i", "--watcherserver", default="0.0.0.0",help="Auxiliar server IP")
+        parser.add_argument(
+            "-p", "--watcherport", default=10275, help="Auxiliar server port"
+        )
+        parser.add_argument("-P", "--port", default=60000, help="Connection port")
+        parser.add_argument("-D", "--debug", help="Enable debug")
+        args = parser.parse_args()
+        logging.debug(args)
+        main(
+            args.ip,
+            args.sn,
+            args.command,
+            args.tag,
+            args.port,
+            args.watcherserver,
+            args.watcherport,
+        )
+    except Exception as e:
+        logging.error(e)

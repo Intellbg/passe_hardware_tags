@@ -166,19 +166,27 @@ def retrieve_watcher_server_ip(ip, sn, port=6000):
 
 def send_request(data, address):
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    client_socket.settimeout(5)
-    try:
-        client_socket.connect(address)
-        client_socket.sendall(bytearray(data))
-        response, server2 = client_socket.recvfrom(64)
-        return bytearray(response)
-    except socket.timeout:
-        logging.error("Timeout: Unable to receive a response within 5 seconds.")
-    except Exception as e:
-        logging.error(e)
-    finally:
-        client_socket.close()
-    return []
+    client_socket.settimeout(10)
+    rp=[]
+    retry = 0
+    while retry<3:
+        try:
+            client_socket.connect(address)
+            client_socket.sendall(bytearray(data))
+            response, server2 = client_socket.recvfrom(64)
+            rp = bytearray(response)
+            retry = 4
+        except socket.timeout:
+            logging.error("Timeout: Unable to receive a response within 5 seconds.")
+            retry += 1
+            logging.error(f"Retry: {retry}")
+        except Exception as e:
+            logging.error(e)
+            retry += 1
+            logging.error(f"Retry: {retry}")
+        finally:
+            client_socket.close()
+    return rp
 
 
 def main(ip, sn, command, tag=None, port=60000, watcher_ip=None, watcher_port=10275):
